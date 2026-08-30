@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -8,9 +9,11 @@ int main(void)
 {
     int server_fd;
     int client_fd;
-    struct sockaddr_in server_addr;
-    char buffer[4096];
     int bytes_received;
+
+    struct sockaddr_in server_addr;
+
+    char buffer[4096];
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -59,12 +62,51 @@ int main(void)
         if (bytes_received == -1) {
             perror("recv");
             close(client_fd);
+        continue;
+        }
+
+        if (bytes_received == 0) {
+            printf("Client closed the connection.\n");
+            close(client_fd);
             continue;
         }
 
         buffer[bytes_received] = '\0';
 
-        printf("Received:\n%s\n", buffer);
+        printf("Received:\n");
+        printf("%s\n", buffer);
+
+        char method[16];
+        char path[256];
+        char version[16];
+
+        if (sscanf(buffer, "%15s %255s %15s", method, path, version) == 3) {
+            printf("Method: %s\n", method);
+            printf("Path: %s\n", path);
+            printf("Version: %s\n", version);
+        }
+
+        char *headers = strstr(buffer, "\r\n");
+
+        if (headers != NULL) {
+            headers += 2;
+
+            printf("Headers:\n");
+            printf("%s\n", headers);
+        }
+
+        const char *body = "Hello, world!\n";
+        char response[1024];
+
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 200 OK\r\n"
+                 "Content-Type: text/plain\r\n"
+                 "Content-Length: %zu\r\n"
+                 "\r\n"
+                 "%s",
+                 strlen(body), body);
+
+        send(client_fd, response, strlen(response), 0);
 
         close(client_fd);
     }
