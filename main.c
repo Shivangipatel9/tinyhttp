@@ -78,7 +78,14 @@ int main(void)
         char version[16];
 
         if (sscanf(buffer, "%15s %255s %15s", method, path, version) != 3) {
-            printf("Invalid HTTP request\n");
+            const char *response =
+                "HTTP/1.1 400 Bad Request\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: 12\r\n"
+                "\r\n"
+                "Bad Request\n";
+
+            send(client_fd, response, strlen(response), 0);
             close(client_fd);
             continue;
         }
@@ -102,35 +109,26 @@ int main(void)
 
         char body[4096];
         int status_code;
+        const char *content_type = "text/plain";
 
-        if (strcmp(path, "/") == 0) {
-
-            int file_fd = open("public/index.html", O_RDONLY);
-
-            if (file_fd == -1) {
-                perror("open");
-                strcpy(body, "Not Found\n");
-                status_code = 404;
-            } else {
-                int bytes_read = read(file_fd, body, sizeof(body) - 1);
-                close(file_fd);
-
-                if (bytes_read == -1) {
-                    perror("read");
-                    strcpy(body, "Internal Server Error\n");
-                    status_code = 500;
-                } else {
-                    body[bytes_read] = '\0';
-                    status_code = 200;
-                }
-            }
-
-       } else if (strcmp(path, "/hello") == 0) {
+        if (strcmp(path, "/hello") == 0) {
             strcpy(body, "Hello from TinyHTTP!\n");
             status_code = 200;
 
-        } else if (strcmp(path, "/style.css") == 0) {
-            int file_fd = open("public/style.css", O_RDONLY);
+        } else if (strstr(path, "..") != NULL) {
+            strcpy(body, "Forbidden\n");
+            status_code = 403;
+
+        } else {
+            char filepath[512];
+
+            if (strcmp(path, "/") == 0) {
+                snprintf(filepath, sizeof(filepath), "public/index.html");
+            } else {
+                snprintf(filepath, sizeof(filepath), "public%s", path);
+            }
+
+            int file_fd = open(filepath, O_RDONLY);
 
             if (file_fd == -1) {
                 perror("open");
@@ -147,17 +145,32 @@ int main(void)
                 } else {
                     body[bytes_read] = '\0';
                     status_code = 200;
+
+                    if (strstr(filepath, ".html") != NULL) {
+                        content_type = "text/html";
+                    } else if (strstr(filepath, ".css") != NULL) {
+                        content_type = "text/css";
+                    } else if (strstr(filepath, ".js") != NULL) {
+                        content_type = "application/javascript";
+                    } else if (strstr(filepath, ".json") != NULL) {
+                        content_type = "application/json";
+                    } else if (strstr(filepath, ".png") != NULL) {
+                        content_type = "image/png";
+                    } else if (strstr(filepath, ".jpg") != NULL ||
+                               strstr(filepath, ".jpeg") != NULL) {
+                        content_type = "image/jpeg";
+                    } else if (strstr(filepath, ".txt") != NULL) {
+                        content_type = "text/plain";
+                    }
                 }
             }
-
-        } else  {
-            strcpy(body, "Not Found\n");
-            status_code = 404;
         }
 
         const char *status_text;
         switch (status_code) {
             case 200: status_text = "OK"; break;
+            case 400: status_text = "Bad Request"; break;
+            case 403: status_text = "Forbidden"; break;
             case 404: status_text = "Not Found"; break;
             case 500: status_text = "Internal Server Error"; break;
             default:  status_text = "Unknown"; break;
@@ -165,23 +178,13 @@ int main(void)
 
         char response[8192];
 
-        const char *content_type;
-
-        if (strcmp(path, "/") == 0) {
-            content_type = "text/html";
-        } else if (strcmp(path, "/style.css") == 0) {
-            content_type = "text/css";
-        } else {
-            content_type = "text/plain";
-        }
-
         snprintf(response, sizeof(response),
-         "HTTP/1.1 %d %s\r\n"
-         "Content-Type: %s\r\n"
-         "Content-Length: %zu\r\n"
-         "\r\n"
-         "%s",
-         status_code, status_text, content_type, strlen(body), body);
+                 "HTTP/1.1 %d %s\r\n"
+                 "Content-Type: %s\r\n"
+                 "Content-Length: %zu\r\n"
+                 "\r\n"
+                 "%s",
+                 status_code, status_text, content_type, strlen(body), body);
 
         send(client_fd, response, strlen(response), 0);
         close(client_fd);
